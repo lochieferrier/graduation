@@ -5,13 +5,13 @@ class Aircraft(Model):
 	"""An aircraft
 	Variables
 	---------
-	m 		[-] 	mass
+	m 		[kg] 	mass
 	"""
 	def setup(self):
 		exec parse_variables(Aircraft.__doc__)
 		self.wing = Wing()
 		self.components = [self.wing]
-		return [self.m >= sum(c.topvar("m") for c in self.components)]
+		return self.components, [self.m >= sum(c.topvar("m") for c in self.components)]
 
 class AircraftP(Model):
 	"""AircraftP
@@ -38,7 +38,7 @@ class Wing(Model):
 	"""
 	def setup(self):
 		exec parse_variables(Wing.__doc__)
-		return [m >=  S*rho]
+		return [m >= S*rho]
 	def dynamic(self,state):
 		return WingP(self,state)
 
@@ -63,12 +63,12 @@ class FlightState(Model):
     mu          1.789e-5    [N*s/m^2]       air viscosity
     V                       [kts]           speed
     qne                     [kg/s^2/m]      never exceed dynamic pressure
-    Vne         160         [kts]           never exceed speed
+    Vne         100         [kts]           never exceed speed
     """
     def setup(self):
         exec parse_variables(FlightState.__doc__)
         return [qne == 0.5*rho*Vne**2]
-        
+
 aircraft = Aircraft()
 aircraft.cost = aircraft.m
 aircraft.debug()
