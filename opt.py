@@ -16,13 +16,13 @@ class Aircraft(Model):
 		self.motor = Motor()
 		self.fuse = Fuselage()
 		self.pilot = Pilot()
-		self.components = [self.wing,self.battery,self.motor,self.fuse,self.pilot]
+		self.components = [self.wing,self.motor,self.fuse,self.battery,self.pilot]
 		self.empty_components = [self.wing,self.motor,self.fuse]
 		constraints = [self.m >= sum(c.topvar("m") for c in self.components),
 					   self.m_empty >= sum(c.topvar("m")  for c in self.empty_components),
 					   self.m_empty <= m_max_empty,
 					   self.fuse.m >= 0.17*self.m]
-		return self.components, constraints
+		return self.components, self.empty_components,constraints
 	def dynamic(self,state):
 		return AircraftP(self,state)
 
@@ -38,7 +38,7 @@ class AircraftP(Model):
 		self.batt_perf = aircraft.battery.dynamic(state)
 		self.motor_perf = aircraft.motor.dynamic(state)
 		fs = state
-		self.perf_models = [self.wing_perf,self.batt_perf]
+		self.perf_models = [self.wing_perf,self.batt_perf,self.motor_perf]
 		constraints = [0.5*aircraft.wing.S*self.wing_perf.C_L*fs.rho*fs.V**2 >= aircraft.m*g,
 					   self.motor_perf.P >= 0.5*aircraft.wing.S*self.wing_perf.C_D*fs.rho*fs.V**3/0.8,
 					   self.batt_perf.P >= self.motor_perf.P/0.8]
@@ -57,7 +57,7 @@ class Pilot(Model):
 	"""Pilot
 	Variables
 	---------
-	m 	80	[kg]
+	m 	85	[kg]	mass of pilot
 	"""
 	def setup(self):
 		exec parse_variables(Pilot.__doc__)
@@ -66,14 +66,14 @@ class Motor(Model):
 	""" Motor
 	Variables
 	---------
-	m 			2.5	 		[kg]
-	P_max_cont 	9			[kW]
+	m 				 		[kg]
+	P_max_cont 				[kW]
 	P_sp_cont	3.64		[kW/kg]
 	RPM_max		7700		[rpm]
 	"""
 	def setup(self):
 		exec parse_variables(Motor.__doc__)
-		constraints = [#m >= P_max_cont/P_sp_cont
+		constraints = [m >= P_max_cont/P_sp_cont
 		]
 		return constraints
 	def dynamic(self,state):
@@ -95,14 +95,14 @@ class Wing(Model):
 	S 			[ft^2]		aero area
 	b  			[m]			span
 	AR 			[-]			aspect ratio
-	rho		3	[kg/m^2]	
+	rho		1	[kg/m^2]	
 	m 			[kg]		mass
 	"""
 	def setup(self):
 		exec parse_variables(Wing.__doc__)
 		return [m >= S*rho,
 				AR == b**2/S,
-				AR <= 10]
+				AR <= 8]
 	def dynamic(self,state):
 		return WingP(self,state)
 
@@ -151,7 +151,7 @@ class Battery(Model):
     def setup(self):
         exec parse_variables(Battery.__doc__)
         constraints = [m >= E_capacity/(eta_pack*Estar),
-        			   # m <= m_lim,
+        			    # m <= m_lim,
         			   E_capacity/E_rho <= V_lim
                        # (P_max_cont/Variable("a",1,"W/kg") - 513.49)*(1+(Estar/Variable("b",40.9911,"Wh/kg"))**(11.79229)) <=  6.17e9,
                        # (P_max_burst/Variable("a",1,"W/kg") - 944.0619)*(1+(Estar/Variable("b",38.21934,"Wh/kg"))**(11.15887)) <=  1.02e10
@@ -209,6 +209,7 @@ class Mission(Model):
 	---------
 	Vstall			24	[kts]	power off level stall speed
 	Vcruise_max		55	[kts]	maximum full power cruise speed
+	R_req			100	[mi]	cruise range requirement
 	"""
 	def setup(self):
 		exec parse_variables(Mission.__doc__)
@@ -217,11 +218,12 @@ class Mission(Model):
 		self.fs = [self.cruise]
 		constraints = [self.aircraft.m*g <= 0.5*self.cruise.flightstate.rho*self.aircraft.wing.S*1.5*self.Vstall**2,
 		self.cruise.flightstate.V <= Vcruise_max,
-		self.aircraft.battery.E_capacity*0.8 >= self.cruise.perf.motor_perf.P*self.cruise.t]
+		self.aircraft.battery.E_capacity*0.8 >= self.cruise.perf.motor_perf.P*self.cruise.t,
+		self.cruise.R >= R_req]
 		return constraints,self.aircraft, self.fs
 
 M = Mission()
-M.cost = 1/M.cruise.R
+M.cost = M.aircraft.m_empty
 # M.debug()
 sol = M.solve(solver="mosek_cli")
 print sol.table()
@@ -229,3 +231,5 @@ print sol.summary()
 print sol(M.cruise.R)
 print sol(M.cruise.perf.wing_perf.LD)
 print sol(M.aircraft.battery.m/M.aircraft.m)
+print sol(M.aircraft.m)
+print sol(M.aircraft.m_empty)
