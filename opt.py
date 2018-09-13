@@ -66,14 +66,14 @@ class Motor(Model):
 	""" Motor
 	Variables
 	---------
-	m 				 		[kg]
-	P_max_cont 				[kW]
+	m 			2.53	 	[kg]
+	P_max_cont 	9.8			[kW]
 	P_sp_cont	3.64		[kW/kg]
 	RPM_max		7700		[rpm]
 	"""
 	def setup(self):
 		exec parse_variables(Motor.__doc__)
-		constraints = [m >= P_max_cont/P_sp_cont
+		constraints = [#m >= P_max_cont/P_sp_cont
 		]
 		return constraints
 	def dynamic(self,state):
@@ -95,24 +95,56 @@ class Wing(Model):
 	S 			[ft^2]		aero area
 	b  			[m]			span
 	AR 			[-]			aspect ratio
-	rho		1	[kg/m^2]	
+	rho			[kg/m^2]	
 	m 			[kg]		mass
 	"""
 	def setup(self):
 		exec parse_variables(Wing.__doc__)
-		return [m >= S*rho,
+		self.spar = SolidSpar()
+		self.skin = Skin()
+		self.components = [self.spar,self.skin]
+		return [self.m >= sum(c.topvar("m") for c in self.components),
 				AR == b**2/S,
-				AR <= 8]
+				AR <= 12,
+				self.spar.l >= self.b,
+				self.skin.S >= self.S*2.3
+				], self.components
 	def dynamic(self,state):
 		return WingP(self,state)
 
+class SolidSpar(Model):
+	"""A solid spar, untapered
+	Variables
+	---------
+	l 			[ft]		length  of spar
+	w 		1	[in]		chordwise width of spar
+	h  		6	[in]		height of spar
+	rho 	380	[kg/m^3]	density of spar
+	m 			[kg]		mass of spar
+	"""
+	def setup(self):
+		exec parse_variables(SolidSpar.__doc__)
+		return [m >= l*w*h*rho]
+
+class Skin(Model):
+	"""Skin
+	Variables
+	---------
+	rho 	0.07 	[lb/ft^2] skin areal density assuming 4 oz cloth
+	S 				[ft^2]	  skin area
+	m 				[kg]	  skin mass	
+	"""
+	def setup(self):
+		exec parse_variables(Skin.__doc__)
+		return [m >= S*rho]
+		
 class WingP(Model):
 	#clark Y airfoil
 	"""Wing performance model
 	Variables
 	---------
 	C_L			[-]	operating C_L
-	C_Lmax	1.4	[-]	maximum C_L
+	C_Lmax	1.5	[-]	maximum C_L
 	C_D			[-]	operating CD
 	C_Di		[-] induced drag
 	C_f			[-] friction drag
@@ -126,7 +158,7 @@ class WingP(Model):
 	def setup(self,wing,state):
 		exec parse_variables(WingP.__doc__)
 		return [C_L<=C_Lmax,
-				Re == state["V"]*state["rho"]*(wing["S"]/wing["AR"])**0.5/state["mu"],
+				Re == state["V"]*state["rho"]*(wing.S/wing["AR"])**0.5/state["mu"],
 				C_D	>= C_Di + C_Dp,
 				C_Di >= C_L**2/(pi*wing["AR"]*e),
 				C_f**5 == (mfac*0.074)**5 /(Re),
@@ -223,11 +255,11 @@ class Mission(Model):
 		return constraints,self.aircraft, self.fs
 
 M = Mission()
-M.cost = M.aircraft.m_empty
+M.cost = M.aircraft.m_empty/M.cruise.R
 # M.debug()
 sol = M.solve(solver="mosek_cli")
 print sol.table()
-print sol.summary()
+# print sol.summary()
 print sol(M.cruise.R)
 print sol(M.cruise.perf.wing_perf.LD)
 print sol(M.aircraft.battery.m/M.aircraft.m)
